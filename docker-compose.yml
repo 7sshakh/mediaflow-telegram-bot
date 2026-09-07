@@ -1,0 +1,71 @@
+version: "3.9"
+
+# ==============================================================================
+# MediaFlow Bot — standalone deployment.
+#
+# The bot logic runs inside the Next.js "app" service (Telegram updates are
+# delivered via webhook to /api/telegram — see README "Deployment"). Redis
+# and Postgres are provided as first-class services; the app automatically
+# uses them when REDIS_URL / DATABASE_URL are set, and degrades gracefully
+# to in-memory rate limiting/caching if Redis is temporarily unavailable.
+#
+# Add an `nginx` service in front of `app` for TLS termination in production
+# (see nginx.conf.example).
+# ==============================================================================
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/mediaflow
+      REDIS_URL: redis://redis:6379
+      TEMP_DIR: /tmp/mediaflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - mediaflow_tmp:/tmp/mediaflow
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mediaflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+  mediaflow_tmp:
